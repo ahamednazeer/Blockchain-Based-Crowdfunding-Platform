@@ -127,18 +127,62 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         return () => clearTimeout(timer);
     }, []);
 
-    // Restore session on mount
+    // Restore session on mount, but always validate role from backend.
     useEffect(() => {
-        const token = api.getToken();
-        const savedAccount = localStorage.getItem('walletAddress');
-        const savedRole = localStorage.getItem('walletRole');
-        if (token && savedAccount) {
-            setAccount(savedAccount);
-            setIsAdmin(savedRole === 'admin');
-            const savedWallet = localStorage.getItem('walletName');
-            if (savedWallet) setWalletName(savedWallet);
+        let cancelled = false;
+
+        async function restoreSession() {
+            const token = api.getToken();
+            if (!token) return;
+
+            try {
+                const me = await api.getMe();
+                if (cancelled) return;
+
+                const backendAddress = (me?.walletAddress || '').toLowerCase();
+                const backendRole = me?.role === 'admin' ? 'admin' : 'user';
+
+                const provider = getProvider();
+                if (provider?.request) {
+                    try {
+                        const accounts = await provider.request({ method: 'eth_accounts' });
+                        const selectedAddress = Array.isArray(accounts) && accounts[0]
+                            ? String(accounts[0]).toLowerCase()
+                            : null;
+
+                        // Prevent stale token/account pair after wallet switch.
+                        if (selectedAddress && selectedAddress !== backendAddress) {
+                            handleDisconnect();
+                            showNotice({
+                                title: 'Session Reset',
+                                message: 'Wallet account changed. Reconnect and sign to continue.',
+                                variant: 'info',
+                            });
+                            return;
+                        }
+                    } catch {
+                        // Ignore provider read issues and continue with backend session.
+                    }
+                }
+
+                setAccount(backendAddress);
+                setIsAdmin(backendRole === 'admin');
+                localStorage.setItem('walletAddress', backendAddress);
+                localStorage.setItem('walletRole', backendRole);
+
+                const savedWallet = localStorage.getItem('walletName');
+                if (savedWallet) setWalletName(savedWallet);
+            } catch {
+                if (cancelled) return;
+                handleDisconnect();
+            }
         }
-    }, []);
+
+        restoreSession();
+        return () => {
+            cancelled = true;
+        };
+    }, [handleDisconnect, showNotice]);
 
     // Listen for account changes in MetaMask
     useEffect(() => {
