@@ -4,18 +4,33 @@ require("dotenv").config({ path: path.resolve(__dirname, "../../backend/.env") }
 const { ethers } = require("ethers");
 
 function parseArgs(argv) {
-    const args = {};
+    const args = { _: [] };
     for (let i = 0; i < argv.length; i++) {
-        const token = argv[i];
+        const token = String(argv[i]).replace(/[\u2012\u2013\u2014\u2015\u2212]/g, "-");
         if (token.startsWith("--")) {
+            const kvIndex = token.indexOf("=");
+            if (kvIndex > 2) {
+                const key = token.slice(2, kvIndex);
+                const value = token.slice(kvIndex + 1);
+                args[key] = value;
+                continue;
+            }
+
             const key = token.slice(2);
             const value = argv[i + 1];
-            if (!value || value.startsWith("--")) {
+            if (!value || String(value).startsWith("-")) {
                 args[key] = true;
             } else {
                 args[key] = value;
                 i++;
             }
+        } else if (token === "-h") {
+            args.h = true;
+        } else if (token.startsWith("-")) {
+            // Ignore unsupported short flags to avoid treating them as positional.
+            continue;
+        } else {
+            args._.push(token);
         }
     }
     return args;
@@ -42,6 +57,11 @@ function normalizePrivateKey(input) {
     if (!input) return "";
     const trimmed = String(input).trim().replace(/^['"]|['"]$/g, "");
     return trimmed.startsWith("0x") ? trimmed : `0x${trimmed}`;
+}
+
+function normalizeArgValue(input) {
+    if (input === undefined || input === null) return "";
+    return String(input).trim().replace(/^['"]|['"]$/g, "");
 }
 
 async function getBestUnlockedSigner(provider, minBalanceWei = 0n) {
@@ -82,15 +102,20 @@ async function main() {
         return;
     }
 
-    const to = args.to;
-    const amount = args.amount;
-    const rpcUrl = args.rpc || process.env.GANACHE_URL || "http://127.0.0.1:7545";
-    const privateKeyInput = args.pk || process.env.ADMIN_PRIVATE_KEY || process.env.PRIVATE_KEY;
+    // Windows shells/npm can forward args differently, so support multiple sources.
+    const to = normalizeArgValue(args.to || process.env.npm_config_to || args._[0]);
+    const amount = normalizeArgValue(args.amount || process.env.npm_config_amount || args._[1]);
+    const rpcUrl = normalizeArgValue(args.rpc || process.env.npm_config_rpc || process.env.GANACHE_URL || "http://127.0.0.1:7545");
+    const privateKeyInput = normalizeArgValue(
+        args.pk || process.env.npm_config_pk || process.env.ADMIN_PRIVATE_KEY || process.env.PRIVATE_KEY
+    );
     const provider = new ethers.JsonRpcProvider(rpcUrl);
 
     if (!to || !amount) {
         printUsage();
-        throw new Error("Missing required arguments: --to and --amount");
+        throw new Error(
+            `Missing required arguments: --to and --amount (received argv: ${JSON.stringify(process.argv.slice(2))})`
+        );
     }
 
     if (!ethers.isAddress(to)) {
