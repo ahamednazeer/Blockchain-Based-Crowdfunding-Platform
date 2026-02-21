@@ -65,11 +65,6 @@ contract CrowdFunding {
         address indexed deletedBy
     );
 
-    event CampaignReactivated(
-        uint256 indexed campaignId,
-        address indexed reactivatedBy
-    );
-
     event CommissionWithdrawn(
         address indexed to,
         uint256 amount
@@ -188,14 +183,6 @@ contract CrowdFunding {
         require(campaign.isActive, "Campaign is already inactive");
         campaign.isActive = false;
         emit CampaignDeleted(_id, msg.sender);
-    }
-
-    function reactivateCampaign(uint256 _id) public onlyAdmin whenNotEmergencyStopped {
-        require(_id < numberOfCampaigns, "Campaign does not exist");
-        Campaign storage campaign = campaigns[_id];
-        require(!campaign.isActive, "Campaign is already active");
-        campaign.isActive = true;
-        emit CampaignReactivated(_id, msg.sender);
     }
 
     function pauseContract() public onlyAdmin whenNotEmergencyStopped {
