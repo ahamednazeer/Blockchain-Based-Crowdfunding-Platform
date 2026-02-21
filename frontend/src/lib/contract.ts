@@ -52,6 +52,14 @@ function isDecodeOrCallFailure(error: any) {
     );
 }
 
+function isMissingRevertData(error: any) {
+    const message = getCombinedErrorMessage(error);
+    return (
+        message.includes('missing revert data') ||
+        message.includes('function selector was not recognized')
+    );
+}
+
 function mapContractReadError(error: any, fallbackMessage: string) {
     if (!isDecodeOrCallFailure(error)) {
         return error;
@@ -79,6 +87,14 @@ function mapContractWriteError(error: any, fallbackMessage: string) {
         return new Error('Campaign is inactive and cannot receive donations.');
     }
 
+    if (message.includes('campaign is already inactive')) {
+        return new Error('Campaign is already inactive.');
+    }
+
+    if (message.includes('campaign is already active')) {
+        return new Error('Campaign is already active.');
+    }
+
     if (message.includes('campaign deadline has passed')) {
         return new Error('Campaign deadline has passed. Donations are closed.');
     }
@@ -97,6 +113,10 @@ function mapContractWriteError(error: any, fallbackMessage: string) {
 
     if (message.includes('insufficient funds')) {
         return new Error('Insufficient funds to cover transaction value and gas.');
+    }
+
+    if (isMissingRevertData(error)) {
+        return new Error(`${fallbackMessage} Contract call failed without revert reason. Verify deployed contract version.`);
     }
 
     if (isDecodeOrCallFailure(error)) {

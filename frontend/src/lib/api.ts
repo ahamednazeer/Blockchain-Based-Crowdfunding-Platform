@@ -58,6 +58,16 @@ export const api = {
         }
     },
 
+    getMyCampaigns: async () => {
+        const res = await client.get('/campaigns/mine');
+        return res.data;
+    },
+
+    getAdminCampaigns: async () => {
+        const res = await client.get('/campaigns/admin/list');
+        return res.data;
+    },
+
     getCampaign: async (id: number) => {
         const res = await client.get(`/campaigns/${id}`);
         return res.data;

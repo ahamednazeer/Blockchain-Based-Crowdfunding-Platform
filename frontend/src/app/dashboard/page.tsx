@@ -25,11 +25,7 @@ export default function UserDashboard() {
         if (!isConnected) return;
         async function fetchData() {
             try {
-                const data = await api.getCampaigns();
-                // Filter to show only this user's campaigns
-                const mine = data.filter(
-                    (c: any) => c.owner.toLowerCase() === account?.toLowerCase()
-                );
+                const mine = await api.getMyCampaigns();
                 setCampaigns(mine);
             } catch (error) {
                 console.error('Failed to fetch campaigns:', error);

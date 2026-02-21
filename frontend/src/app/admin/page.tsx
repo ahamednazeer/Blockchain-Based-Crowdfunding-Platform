@@ -49,7 +49,7 @@ export default function AdminDashboard() {
     const [deleteTarget, setDeleteTarget] = useState<any>(null);
     const [deleting, setDeleting] = useState(false);
 
-    const [moderationId, setModerationId] = useState('');
+    const [selectedCampaignId, setSelectedCampaignId] = useState('');
     const [withdrawAmountEth, setWithdrawAmountEth] = useState('');
 
     const [emergencyModalOpen, setEmergencyModalOpen] = useState(false);
@@ -59,10 +59,15 @@ export default function AdminDashboard() {
         setLoading(true);
         try {
             const [campaignData, state] = await Promise.all([
-                api.getCampaigns(),
+                api.getAdminCampaigns(),
                 api.getAdminState(),
             ]);
             setCampaigns(campaignData);
+            setSelectedCampaignId((prev) => {
+                if (!prev) return prev;
+                const stillActive = campaignData.some((c: any) => String(c.id) === prev && c.isActive);
+                return stillActive ? prev : '';
+            });
             setPlatformState(state);
         } catch (error) {
             console.error('Failed to fetch admin data:', error);
@@ -80,6 +85,7 @@ export default function AdminDashboard() {
     const activeCampaigns = campaigns.filter((c) => c.isActive);
     const totalRaised = campaigns.reduce((sum, c) => sum + parseFloat(c.amountCollected || '0'), 0);
     const completedCount = campaigns.filter((c) => c.percentFunded >= 100).length;
+    const moderationCandidates = campaigns.filter((c) => c.isActive);
 
     const contractStatusText = useMemo(() => {
         if (!platformState) return 'UNKNOWN';
@@ -107,7 +113,7 @@ export default function AdminDashboard() {
             setActionLoading('');
             setDeleting(false);
             setDeleteTarget(null);
-            setModerationId('');
+            setSelectedCampaignId('');
         }
     };
 
@@ -150,9 +156,9 @@ export default function AdminDashboard() {
     };
 
     const handleModerationDelete = async () => {
-        const id = Number(moderationId);
+        const id = Number(selectedCampaignId);
         if (!Number.isInteger(id) || id < 0) {
-            alert('Enter a valid campaign ID');
+            alert('Select a campaign to deactivate');
             return;
         }
         await handleDelete(id);
@@ -303,23 +309,32 @@ export default function AdminDashboard() {
                     <div className="card space-y-4">
                         <div>
                             <h3 className="text-sm font-mono text-slate-400 uppercase tracking-widest">Campaign Moderation</h3>
-                            <p className="text-xs text-slate-600 mt-1">Deactivate a campaign by entering its ID.</p>
+                            <p className="text-xs text-slate-600 mt-1">Select an active campaign and deactivate it.</p>
                         </div>
-                        <div className="flex gap-2">
-                            <input
-                                type="number"
-                                min="0"
-                                value={moderationId}
-                                onChange={(e) => setModerationId(e.target.value)}
-                                placeholder="Campaign ID"
+                        <div className="space-y-2">
+                            <select
+                                value={selectedCampaignId}
+                                onChange={(e) => setSelectedCampaignId(e.target.value)}
                                 className="input-modern"
-                            />
+                                disabled={moderationCandidates.length === 0 || actionLoading.startsWith('delete-')}
+                            >
+                                <option value="">
+                                    {moderationCandidates.length === 0
+                                        ? 'No active campaigns'
+                                        : 'Select active campaign'}
+                                </option>
+                                {moderationCandidates.map((c) => (
+                                    <option key={c.id} value={String(c.id)}>
+                                        #{c.id} - {c.title}
+                                    </option>
+                                ))}
+                            </select>
                             <button
                                 onClick={handleModerationDelete}
-                                disabled={actionLoading.startsWith('delete-')}
-                                className="btn-danger whitespace-nowrap"
+                                disabled={actionLoading.startsWith('delete-') || !selectedCampaignId}
+                                className="btn-danger w-full"
                             >
-                                Deactivate
+                                {actionLoading.startsWith('delete-') ? 'Deactivating...' : 'Deactivate'}
                             </button>
                         </div>
                     </div>

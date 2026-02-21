@@ -41,11 +41,19 @@ function mapContractReadError(error, fallbackMessage) {
     if (
         rpcUnavailableCodes.has(code) ||
         combinedMessage.includes("failed to detect network") ||
-        combinedMessage.includes("missing response")
+        combinedMessage.includes("missing response") ||
+        combinedMessage.includes("contract provider not available")
     ) {
         return {
             status: 503,
             error: "Blockchain node is unavailable. Ensure Ganache is running and GANACHE_URL is correct.",
+        };
+    }
+
+    if (combinedMessage.includes("no contract deployed at configured address")) {
+        return {
+            status: 503,
+            error: "No contract deployed at configured address. Redeploy and update deployed-address.json.",
         };
     }
 
@@ -246,6 +254,62 @@ async function getPlatformStateCompat(contract) {
     }
 }
 
+async function getCampaignList(contract, { includeInactive = false } = {}) {
+    const provider = contract.runner?.provider;
+    if (!provider || typeof provider.getCode !== "function") {
+        throw new Error("Contract provider not available. Ensure blockchain connection is initialized.");
+    }
+
+    const onChainCode = await provider.getCode(contract.target);
+    if (!onChainCode || onChainCode === "0x") {
+        throw new Error("No contract deployed at configured address. Redeploy and update deployed-address.json.");
+    }
+
+    const result = await callReadCompat(contract, "getCampaigns");
+    const {
+        ids,
+        owners,
+        titles,
+        descriptions,
+        categories,
+        goals,
+        deadlines,
+        bannerCIDs,
+        amountsCollected,
+        createdAts,
+        isActives,
+    } = normalizeCampaignArrays(result);
+
+    const campaigns = [];
+    for (let i = 0; i < ids.length; i++) {
+        const campaign = {
+            id: Number(ids[i]),
+            owner: owners[i],
+            title: titles[i],
+            description: descriptions[i],
+            category: categories[i],
+            goal: ethers.formatEther(goals[i]),
+            goalWei: goals[i].toString(),
+            deadline: Number(deadlines[i]),
+            createdAt: Number(createdAts[i]),
+            bannerCID: bannerCIDs[i],
+            bannerUrl: bannerCIDs[i]
+                ? `https://gateway.pinata.cloud/ipfs/${bannerCIDs[i]}`
+                : null,
+            amountCollected: ethers.formatEther(amountsCollected[i]),
+            amountCollectedWei: amountsCollected[i].toString(),
+            isActive: isActives[i],
+            percentFunded: computePercentFunded(amountsCollected[i], goals[i]),
+        };
+        campaigns.push(campaign);
+    }
+
+    if (includeInactive) {
+        return campaigns;
+    }
+    return campaigns.filter((campaign) => campaign.isActive);
+}
+
 function getPinataAuthHeaders() {
     const pinataJwt = process.env.PINATA_JWT;
     if (pinataJwt) {
@@ -384,59 +448,7 @@ router.get("/", async (req, res) => {
         if (!contract) {
             return res.status(503).json({ error: "Contract not available" });
         }
-
-        const provider = contract.runner?.provider;
-        if (!provider || typeof provider.getCode !== "function") {
-            return res.status(503).json({
-                error: "Contract provider not available. Ensure blockchain connection is initialized.",
-            });
-        }
-
-        const onChainCode = await provider.getCode(contract.target);
-        if (!onChainCode || onChainCode === "0x") {
-            return res.status(503).json({
-                error: "No contract deployed at configured address. Redeploy and update deployed-address.json.",
-            });
-        }
-
-        const result = await callReadCompat(contract, "getCampaigns");
-        const {
-            ids,
-            owners,
-            titles,
-            descriptions,
-            categories,
-            goals,
-            deadlines,
-            bannerCIDs,
-            amountsCollected,
-            createdAts,
-            isActives,
-        } = normalizeCampaignArrays(result);
-
-        const campaigns = [];
-        for (let i = 0; i < ids.length; i++) {
-            campaigns.push({
-                id: Number(ids[i]),
-                owner: owners[i],
-                title: titles[i],
-                description: descriptions[i],
-                category: categories[i],
-                goal: ethers.formatEther(goals[i]),
-                goalWei: goals[i].toString(),
-                deadline: Number(deadlines[i]),
-                createdAt: Number(createdAts[i]),
-                bannerCID: bannerCIDs[i],
-                bannerUrl: bannerCIDs[i]
-                    ? `https://gateway.pinata.cloud/ipfs/${bannerCIDs[i]}`
-                    : null,
-                amountCollected: ethers.formatEther(amountsCollected[i]),
-                amountCollectedWei: amountsCollected[i].toString(),
-                isActive: isActives[i],
-                percentFunded: computePercentFunded(amountsCollected[i], goals[i]),
-            });
-        }
-
+        const campaigns = await getCampaignList(contract, { includeInactive: false });
         res.json(campaigns);
     } catch (error) {
         console.error("Get campaigns error:", error);
@@ -460,6 +472,54 @@ router.get("/admin/state", auth, adminOnly, async (req, res) => {
     } catch (error) {
         console.error("Get admin state error:", error);
         const mapped = mapContractReadError(error, "Failed to fetch admin state");
+        res.status(mapped.status).json({ error: mapped.error });
+    }
+});
+
+/**
+ * GET /api/campaigns/admin/list
+ * Admin-only: fetch all campaigns (including inactive) for moderation.
+ */
+router.get("/admin/list", auth, adminOnly, async (req, res) => {
+    try {
+        const contract = getContract();
+        if (!contract) {
+            return res.status(503).json({ error: "Contract not available" });
+        }
+        const campaigns = await getCampaignList(contract, { includeInactive: true });
+        res.json(campaigns);
+    } catch (error) {
+        console.error("Get admin campaigns error:", error);
+        const mapped = mapContractReadError(error, "Failed to fetch campaigns");
+        res.status(mapped.status).json({ error: mapped.error });
+    }
+});
+
+/**
+ * GET /api/campaigns/mine
+ * Auth-only: fetch campaigns created by the signed-in wallet (including inactive).
+ */
+router.get("/mine", auth, async (req, res) => {
+    try {
+        const contract = getContract();
+        if (!contract) {
+            return res.status(503).json({ error: "Contract not available" });
+        }
+
+        const owner = (req.user?.walletAddress || "").toLowerCase();
+        if (!owner || !ethers.isAddress(owner)) {
+            return res.status(400).json({ error: "Invalid user wallet address in token" });
+        }
+
+        const campaigns = await getCampaignList(contract, { includeInactive: true });
+        const mine = campaigns
+            .filter((campaign) => (campaign.owner || "").toLowerCase() === owner)
+            .sort((a, b) => b.id - a.id);
+
+        res.json(mine);
+    } catch (error) {
+        console.error("Get my campaigns error:", error);
+        const mapped = mapContractReadError(error, "Failed to fetch your campaigns");
         res.status(mapped.status).json({ error: mapped.error });
     }
 });
