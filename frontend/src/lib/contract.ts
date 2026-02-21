@@ -26,9 +26,24 @@ const CONTRACT_ABI = [
 
 const NETWORK_HINT = 'Switch MetaMask to the Ganache network and retry.';
 
+function getCombinedErrorMessage(error: any) {
+    return [
+        error?.reason,
+        error?.shortMessage,
+        error?.message,
+        error?.info?.error?.message,
+        error?.info?.error?.data?.reason,
+        error?.error?.message,
+        error?.data?.message,
+    ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+}
+
 function isDecodeOrCallFailure(error: any) {
     const code = error?.code || error?.cause?.code;
-    const message = `${error?.shortMessage || ''} ${error?.message || ''}`.toLowerCase();
+    const message = getCombinedErrorMessage(error);
     return (
         code === 'BAD_DATA' ||
         code === 'CALL_EXCEPTION' ||
@@ -42,6 +57,53 @@ function mapContractReadError(error: any, fallbackMessage: string) {
         return error;
     }
     return new Error(`${fallbackMessage} ${NETWORK_HINT}`);
+}
+
+function mapContractWriteError(error: any, fallbackMessage: string) {
+    const code = error?.code ?? error?.info?.error?.code;
+    const message = getCombinedErrorMessage(error);
+
+    if (code === 4001 || code === 'ACTION_REJECTED') {
+        return new Error('Transaction rejected in wallet.');
+    }
+
+    if (message.includes('contract permanently stopped') || message.includes('permanently stopped')) {
+        return new Error('Contract is permanently stopped by emergency shutdown. Donations are disabled.');
+    }
+
+    if (message.includes('contract is paused')) {
+        return new Error('Contract is paused by admin. Donations are temporarily disabled.');
+    }
+
+    if (message.includes('campaign is no longer active')) {
+        return new Error('Campaign is inactive and cannot receive donations.');
+    }
+
+    if (message.includes('campaign deadline has passed')) {
+        return new Error('Campaign deadline has passed. Donations are closed.');
+    }
+
+    if (message.includes('campaign does not exist')) {
+        return new Error('Campaign does not exist on the current contract.');
+    }
+
+    if (message.includes('donation must be greater than zero')) {
+        return new Error('Donation amount must be greater than zero.');
+    }
+
+    if (message.includes('only admin can perform this action')) {
+        return new Error('Connected wallet is not the contract admin.');
+    }
+
+    if (message.includes('insufficient funds')) {
+        return new Error('Insufficient funds to cover transaction value and gas.');
+    }
+
+    if (isDecodeOrCallFailure(error)) {
+        return new Error(`${fallbackMessage} ${NETWORK_HINT}`);
+    }
+
+    return error instanceof Error ? error : new Error(fallbackMessage);
 }
 
 /**
@@ -139,7 +201,7 @@ export async function createCampaign(
         const receipt = await tx.wait();
         return receipt;
     } catch (error) {
-        throw mapContractReadError(error, 'Failed to create campaign.');
+        throw mapContractWriteError(error, 'Failed to create campaign.');
     }
 }
 
@@ -147,12 +209,16 @@ export async function createCampaign(
  * Donate to a campaign via smart contract.
  */
 export async function donateToCampaign(campaignId: number, amountInEth: string) {
-    const contract = await getContract();
-    const tx = await contract.donateToCampaign(campaignId, {
-        value: ethers.parseEther(amountInEth),
-    });
-    const receipt = await tx.wait();
-    return receipt;
+    try {
+        const contract = await getContract();
+        const tx = await contract.donateToCampaign(campaignId, {
+            value: ethers.parseEther(amountInEth),
+        });
+        const receipt = await tx.wait();
+        return receipt;
+    } catch (error) {
+        throw mapContractWriteError(error, 'Failed to donate to campaign.');
+    }
 }
 
 /**
@@ -168,6 +234,67 @@ export async function getCampaignCreationFeeEth() {
         };
     } catch (error) {
         throw mapContractReadError(error, 'Failed to read campaign creation fee.');
+    }
+}
+
+export async function pauseContractOnChain() {
+    try {
+        const contract = await getContract();
+        const tx = await contract.pauseContract();
+        return await tx.wait();
+    } catch (error) {
+        throw mapContractWriteError(error, 'Failed to pause contract.');
+    }
+}
+
+export async function resumeContractOnChain() {
+    try {
+        const contract = await getContract();
+        const tx = await contract.resumeContract();
+        return await tx.wait();
+    } catch (error) {
+        throw mapContractWriteError(error, 'Failed to resume contract.');
+    }
+}
+
+export async function deleteCampaignOnChain(campaignId: number) {
+    try {
+        const contract = await getContract();
+        const tx = await contract.deleteCampaign(campaignId);
+        return await tx.wait();
+    } catch (error) {
+        throw mapContractWriteError(error, 'Failed to deactivate campaign.');
+    }
+}
+
+export async function withdrawCommissionsOnChain(amountEth: string, to?: string) {
+    try {
+        const contract = await getContract();
+        const signer = await getSigner();
+        const recipient = to || await signer.getAddress();
+        if (!ethers.isAddress(recipient)) {
+            throw new Error('Invalid recipient address.');
+        }
+        const amountWei = ethers.parseEther(amountEth);
+        const tx = await contract.withdrawCommissions(recipient, amountWei);
+        return await tx.wait();
+    } catch (error) {
+        throw mapContractWriteError(error, 'Failed to withdraw commissions.');
+    }
+}
+
+export async function emergencyWithdrawAndStopOnChain(to?: string) {
+    try {
+        const contract = await getContract();
+        const signer = await getSigner();
+        const recipient = to || await signer.getAddress();
+        if (!ethers.isAddress(recipient)) {
+            throw new Error('Invalid recipient address.');
+        }
+        const tx = await contract.emergencyWithdrawAndStop(recipient);
+        return await tx.wait();
+    } catch (error) {
+        throw mapContractWriteError(error, 'Failed to execute emergency stop.');
     }
 }
 

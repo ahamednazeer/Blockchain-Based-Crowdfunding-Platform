@@ -470,7 +470,7 @@ router.get("/admin/state", auth, adminOnly, async (req, res) => {
  */
 router.post("/admin/pause", auth, adminOnly, async (req, res) => {
     try {
-        const adminContract = getAdminContract();
+        const adminContract = await getAdminContract();
         const tx = await adminContract.pauseContract();
         await tx.wait();
         res.json({ message: "Contract paused", txHash: tx.hash });
@@ -487,7 +487,7 @@ router.post("/admin/pause", auth, adminOnly, async (req, res) => {
  */
 router.post("/admin/resume", auth, adminOnly, async (req, res) => {
     try {
-        const adminContract = getAdminContract();
+        const adminContract = await getAdminContract();
         const tx = await adminContract.resumeContract();
         await tx.wait();
         res.json({ message: "Contract resumed", txHash: tx.hash });
@@ -506,7 +506,7 @@ router.post("/admin/resume", auth, adminOnly, async (req, res) => {
 router.post("/admin/withdraw-commissions", auth, adminOnly, async (req, res) => {
     try {
         const contract = getContract();
-        const adminContract = getAdminContract();
+        const adminContract = await getAdminContract();
         if (!contract || !adminContract) {
             return res.status(503).json({ error: "Contract not available" });
         }
@@ -551,7 +551,7 @@ router.post("/admin/withdraw-commissions", auth, adminOnly, async (req, res) => 
  */
 router.post("/admin/emergency-stop", auth, adminOnly, async (req, res) => {
     try {
-        const adminContract = getAdminContract();
+        const adminContract = await getAdminContract();
         const to = req.body?.to || req.user.walletAddress;
         if (!ethers.isAddress(to)) {
             return res.status(400).json({ error: "Invalid recipient address" });
@@ -646,7 +646,7 @@ router.get("/:id", async (req, res) => {
  */
 router.delete("/:id", auth, adminOnly, async (req, res) => {
     try {
-        const adminContract = getAdminContract();
+        const adminContract = await getAdminContract();
         const campaignId = parseInt(req.params.id);
         if (Number.isNaN(campaignId) || campaignId < 0) {
             return res.status(400).json({ error: "Invalid campaign id" });

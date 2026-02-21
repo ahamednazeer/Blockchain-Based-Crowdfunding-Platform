@@ -4,6 +4,13 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWallet } from '@/contexts/WalletContext';
 import { api } from '@/lib/api';
+import {
+    deleteCampaignOnChain,
+    emergencyWithdrawAndStopOnChain,
+    pauseContractOnChain,
+    resumeContractOnChain,
+    withdrawCommissionsOnChain,
+} from '@/lib/contract';
 import DashboardLayout from '@/components/DashboardLayout';
 import { DataCard } from '@/components/DataCard';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -33,7 +40,7 @@ interface PlatformState {
 
 export default function AdminDashboard() {
     const router = useRouter();
-    const { isConnected, isAdmin, connectWallet } = useWallet();
+    const { account, isConnected, isAdmin, connectWallet } = useWallet();
     const [campaigns, setCampaigns] = useState<any[]>([]);
     const [platformState, setPlatformState] = useState<PlatformState | null>(null);
     const [loading, setLoading] = useState(true);
@@ -81,14 +88,21 @@ export default function AdminDashboard() {
         return 'ACTIVE';
     }, [platformState]);
 
+    const getActionError = (error: any, fallback: string) =>
+        error?.response?.data?.error ||
+        error?.reason ||
+        error?.shortMessage ||
+        error?.message ||
+        fallback;
+
     const handleDelete = async (campaignId: number) => {
         setActionLoading(`delete-${campaignId}`);
         try {
-            await api.deleteCampaign(campaignId);
+            await deleteCampaignOnChain(campaignId);
             await loadData();
         } catch (error: any) {
             console.error('Delete failed:', error);
-            alert(error?.response?.data?.error || 'Failed to delete campaign');
+            alert(getActionError(error, 'Failed to delete campaign'));
         } finally {
             setActionLoading('');
             setDeleting(false);
@@ -98,18 +112,22 @@ export default function AdminDashboard() {
     };
 
     const handlePauseResume = async () => {
-        if (!platformState || platformState.isEmergencyStopped) return;
+        if (!platformState) return;
+        if (platformState.isEmergencyStopped) {
+            alert('Contract is permanently stopped after emergency shutdown. Resume is not possible.');
+            return;
+        }
         setActionLoading('pause-resume');
         try {
             if (platformState.isPaused) {
-                await api.resumeContract();
+                await resumeContractOnChain();
             } else {
-                await api.pauseContract();
+                await pauseContractOnChain();
             }
             await loadData();
         } catch (error: any) {
             console.error('Pause/resume failed:', error);
-            alert(error?.response?.data?.error || 'Failed to update contract pause state');
+            alert(getActionError(error, 'Failed to update contract pause state'));
         } finally {
             setActionLoading('');
         }
@@ -119,12 +137,13 @@ export default function AdminDashboard() {
         if (!platformState) return;
         setActionLoading('withdraw');
         try {
-            await api.withdrawCommissions(withdrawAmountEth.trim() || undefined);
+            const amountToWithdraw = withdrawAmountEth.trim() || platformState.contractBalanceEth;
+            await withdrawCommissionsOnChain(amountToWithdraw, account || undefined);
             await loadData();
             setWithdrawAmountEth('');
         } catch (error: any) {
             console.error('Withdraw failed:', error);
-            alert(error?.response?.data?.error || 'Failed to withdraw commissions');
+            alert(getActionError(error, 'Failed to withdraw commissions'));
         } finally {
             setActionLoading('');
         }
@@ -146,13 +165,13 @@ export default function AdminDashboard() {
         }
         setActionLoading('emergency');
         try {
-            await api.emergencyStop();
+            await emergencyWithdrawAndStopOnChain(account || undefined);
             setEmergencyModalOpen(false);
             setEmergencyConfirmText('');
             await loadData();
         } catch (error: any) {
             console.error('Emergency stop failed:', error);
-            alert(error?.response?.data?.error || 'Failed to execute emergency stop');
+            alert(getActionError(error, 'Failed to execute emergency stop'));
         } finally {
             setActionLoading('');
         }
@@ -251,7 +270,7 @@ export default function AdminDashboard() {
                             <button
                                 onClick={handlePauseResume}
                                 disabled={actionLoading === 'pause-resume' || platformState?.isEmergencyStopped}
-                                className="btn-secondary flex items-center gap-2"
+                                className={`flex items-center gap-2 ${platformState?.isEmergencyStopped ? 'btn-danger opacity-70 cursor-not-allowed' : 'btn-secondary'}`}
                             >
                                 {actionLoading === 'pause-resume' ? (
                                     <>
@@ -261,14 +280,24 @@ export default function AdminDashboard() {
                                 ) : (
                                     <>
                                         <Power size={16} />
-                                        {platformState?.isPaused ? 'Resume Contract' : 'Pause Contract'}
+                                        {platformState?.isEmergencyStopped
+                                            ? 'Permanently Stopped'
+                                            : platformState?.isPaused
+                                                ? 'Resume Contract'
+                                                : 'Pause Contract'}
                                     </>
                                 )}
                             </button>
                         </div>
-                        <p className="text-xs text-slate-600 font-mono">
-                            Paused contract blocks new campaign creation and donations.
-                        </p>
+                        {platformState?.isEmergencyStopped ? (
+                            <p className="text-xs text-red-400 font-mono">
+                                Emergency stop is irreversible. Contract cannot be resumed.
+                            </p>
+                        ) : (
+                            <p className="text-xs text-slate-600 font-mono">
+                                Paused contract blocks new campaign creation and donations.
+                            </p>
+                        )}
                     </div>
 
                     <div className="card space-y-4">

@@ -34,21 +34,29 @@ function normalizePrivateKey(input) {
 function resolveAdminAddress(defaultAddress) {
     const raw = (process.env.ADMIN_PRIVATE_KEY || process.env.ADMIN_ADDRESS || "").trim();
     if (!raw) {
-        return { adminAddress: defaultAddress, source: "deployer" };
+        return { adminAddress: defaultAddress, source: "deployer", adminPrivateKey: null };
     }
 
     if (hre.ethers.isAddress(raw)) {
-        return { adminAddress: raw, source: "ADMIN_PRIVATE_KEY/ADMIN_ADDRESS (address)" };
+        return {
+            adminAddress: raw,
+            source: "ADMIN_PRIVATE_KEY/ADMIN_ADDRESS (address)",
+            adminPrivateKey: null,
+        };
     }
 
     const normalizedPk = normalizePrivateKey(raw);
     if (/^0x[0-9a-fA-F]{64}$/.test(normalizedPk)) {
         const wallet = new hre.ethers.Wallet(normalizedPk);
-        return { adminAddress: wallet.address, source: "ADMIN_PRIVATE_KEY (private key)" };
+        return {
+            adminAddress: wallet.address,
+            source: "ADMIN_PRIVATE_KEY (private key)",
+            adminPrivateKey: normalizedPk,
+        };
     }
 
     console.warn("  [WARN] ADMIN_PRIVATE_KEY/ADMIN_ADDRESS is invalid. Falling back to deployer as admin.");
-    return { adminAddress: defaultAddress, source: "deployer (fallback)" };
+    return { adminAddress: defaultAddress, source: "deployer (fallback)", adminPrivateKey: null };
 }
 
 
@@ -73,7 +81,11 @@ async function main() {
 
     const deployer = signerWithBalances[0].signer;
     const deployerBalance = signerWithBalances[0].balance;
-    const { adminAddress, source: adminSource } = resolveAdminAddress(deployer.address);
+    const {
+        adminAddress,
+        source: adminSource,
+        adminPrivateKey,
+    } = resolveAdminAddress(deployer.address);
     const creationFeeEth = process.env.CAMPAIGN_CREATION_FEE_ETH || "0.01";
     const creationFeeWei = hre.ethers.parseEther(creationFeeEth);
 
@@ -86,6 +98,13 @@ async function main() {
     console.log("  Deployer address:", deployer.address);
     console.log("  Admin address:", adminAddress);
     console.log("  Admin source:", adminSource);
+    if (adminPrivateKey) {
+        console.log("  Admin private key (MetaMask import):", adminPrivateKey);
+    } else {
+        console.log(
+            "  Admin private key (MetaMask import): unavailable (set ADMIN_PRIVATE_KEY to a real private key to print)"
+        );
+    }
     console.log("  Campaign creation fee:", creationFeeEth, "ETH");
     console.log("  Selected deployer balance:", hre.ethers.formatEther(deployerBalance), "ETH");
 

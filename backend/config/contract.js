@@ -59,7 +59,7 @@ function initContract() {
 /**
  * Get a signer for admin operations (using admin private key).
  */
-function getAdminSigner() {
+async function getAdminSigner() {
     if (!provider) {
         throw new Error("Provider not initialized");
     }
@@ -70,7 +70,17 @@ function getAdminSigner() {
 
     // Support Ganache unlocked-account flow when env stores address.
     if (ethers.isAddress(raw)) {
-        return provider.getSigner(raw);
+        try {
+            const signer = await provider.getSigner(raw);
+            await signer.getAddress();
+            return signer;
+        } catch {
+            throw new Error(
+                `ADMIN_PRIVATE_KEY is configured as address ${raw}, but this RPC cannot sign for it. ` +
+                "Set ADMIN_PRIVATE_KEY to the private key (0x + 64 hex) for the deployed admin wallet, " +
+                "or start Ganache with that account unlocked."
+            );
+        }
     }
 
     const normalized = raw.startsWith("0x") ? raw : `0x${raw}`;
@@ -86,8 +96,8 @@ function getAdminSigner() {
 /**
  * Get the contract instance connected with admin signer.
  */
-function getAdminContract() {
-    const signer = getAdminSigner();
+async function getAdminContract() {
+    const signer = await getAdminSigner();
     const artifact = getContractArtifact();
     return new ethers.Contract(contractAddress, artifact.abi, signer);
 }

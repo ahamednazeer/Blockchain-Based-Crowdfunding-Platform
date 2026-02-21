@@ -27,6 +27,7 @@ Admin address used at deploy time:
 - If `ADMIN_PRIVATE_KEY` is set to a private key, that wallet address becomes contract admin.
 - If `ADMIN_PRIVATE_KEY` (or `ADMIN_ADDRESS`) is an address, that address becomes contract admin.
 - Otherwise deployer wallet is used.
+- `npm run deploy` prints `Admin private key (MetaMask import)` when `ADMIN_PRIVATE_KEY` is a real private key.
 
 Hardhat signer mode:
 - By default, deploy uses Ganache unlocked accounts (funded node accounts).
