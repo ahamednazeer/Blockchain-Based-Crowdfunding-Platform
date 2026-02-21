@@ -1,0 +1,19 @@
+{
+    "name": "crowdfunding-blockchain",
+    "version": "1.0.0",
+    "description": "Smart contracts for Blockchain-Based Crowdfunding Platform",
+    "scripts": {
+        "compile": "npx hardhat compile",
+        "deploy": "npx hardhat run scripts/deploy.js --network ganache",
+        "test": "npx hardhat test",
+        "send:eth": "node scripts/send-eth.js",
+        "chain:start": "npx ganache --server.port 7545 --chain.chainId 1337 --database.dbPath ./.ganache-db",
+        "chain:start:fresh": "npx ganache --server.port 7545 --chain.chainId 1337",
+        "chain:reset": "rm -rf ./.ganache-db"
+    },
+    "devDependencies": {
+        "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+        "dotenv": "^16.4.7",
+        "hardhat": "^2.22.0"
+    }
+}
